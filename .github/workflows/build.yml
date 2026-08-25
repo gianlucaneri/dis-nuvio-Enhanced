@@ -14,17 +14,21 @@ jobs:
           submodules: false
           fetch-depth: 1
 
-      - name: Scarica solo i submoduli che servono a iOS
-        # libass-android e mpvEx sono submoduli Android registrati male:
-        # se li tocchi, git si ferma. Prendiamo solo MPVKit.
+      - name: Scarica MPVKit a mano
+        # Il meccanismo dei submoduli e' rotto in questo repo (libass-android
+        # e mpvEx non hanno url in .gitmodules). MPVKit lo cloniamo diretto,
+        # al commit a cui il progetto e' agganciato.
         run: |
-          git submodule init MPVKit || echo "MPVKit non registrato, proseguo"
-          git submodule update --depth 1 MPVKit || echo "MPVKit non scaricato, proseguo"
-          echo "--- stato submoduli ---"
-          git submodule status || true
+          rm -rf MPVKit
+          git clone https://github.com/NuvioMedia/MPVKit.git MPVKit
+          cd MPVKit
+          git checkout 20afe97c34e46fce08a3794e2afa64613ea62794
+          cd ..
+          echo "--- contenuto di MPVKit ---"
+          ls -la MPVKit | head -n 20
 
       - name: Java per la parte Kotlin Multiplatform
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
@@ -36,7 +40,7 @@ jobs:
         env:
           NUVIO_IOS_DISTRIBUTION: full
         run: |
-          set -e
+          set -o pipefail
           xcodebuild \
             -project iosApp/iosApp.xcodeproj \
             -scheme iosApp \
@@ -46,7 +50,24 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            build
+            build 2>&1 | tee build.log
+
+      - name: Riepilogo degli errori
+        # Gira comunque, anche se la compilazione fallisce
+        if: always()
+        run: |
+          echo "=============== RIGHE DI ERRORE ==============="
+          grep -n "error:" build.log | tail -n 40 || echo "nessuna riga con 'error:'"
+          echo "=============== ULTIME 40 RIGHE ==============="
+          tail -n 40 build.log
+
+      - name: Salva il log completo
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+          retention-days: 7
 
       - name: Impacchetta in .ipa
         run: |
