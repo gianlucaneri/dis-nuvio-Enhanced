@@ -1,0 +1,72 @@
+name: Build iOS IPA (unsigned)
+
+# Lanciato a mano dalla tab Actions del repository.
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout con i submoduli
+        uses: actions/checkout@v4
+        with:
+          # MPVKit e libass sono submoduli: senza questo la build fallisce sul link
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Java per la parte Kotlin Multiplatform
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Versione di Xcode in uso
+        run: xcodebuild -version
+
+      - name: Compila senza firma
+        # NUVIO_IOS_DISTRIBUTION=full abilita il set completo di funzionalita:
+        # se la build si lamenta di questa variabile, togli la riga env.
+        env:
+          NUVIO_IOS_DISTRIBUTION: full
+        run: |
+          set -e
+          xcodebuild \
+            -project iosApp/iosApp.xcodeproj \
+            -scheme iosApp \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build/ios \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Impacchetta in .ipa
+        run: |
+          set -e
+          APP_PATH=$(find build/ios/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
+          echo "Trovato: $APP_PATH"
+          mkdir -p Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qry Nuvio-unsigned.ipa Payload
+
+      - name: Leggi bundle ID e versione
+        # Te li stampa nel log: sono i valori che ti servono per l'App ID e per il manifest
+        run: |
+          PLIST=$(find Payload -maxdepth 2 -name "Info.plist" | head -n 1)
+          echo "--- dati per Apple Developer e manifest.plist ---"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier"        "$PLIST"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion"            "$PLIST"
+          /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion"           "$PLIST"
+          echo "--- estensioni presenti (se vuoto, nessuna) ---"
+          ls Payload/*.app/PlugIns 2>/dev/null || echo "nessuna"
+
+      - name: Pubblica l'artefatto
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nuvio-unsigned-ipa
+          path: Nuvio-unsigned.ipa
+          retention-days: 30
