@@ -1,6 +1,5 @@
 name: Build iOS IPA (unsigned)
 
-# Lanciato a mano dalla tab Actions del repository.
 on:
   workflow_dispatch:
 
@@ -9,12 +8,20 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - name: Checkout con i submoduli
-        uses: actions/checkout@v4
+      - name: Checkout senza submoduli
+        uses: actions/checkout@v5
         with:
-          # MPVKit e libass sono submoduli: senza questo la build fallisce sul link
-          submodules: recursive
+          submodules: false
           fetch-depth: 1
+
+      - name: Scarica solo i submoduli che servono a iOS
+        # libass-android e mpvEx sono submoduli Android registrati male:
+        # se li tocchi, git si ferma. Prendiamo solo MPVKit.
+        run: |
+          git submodule init MPVKit || echo "MPVKit non registrato, proseguo"
+          git submodule update --depth 1 MPVKit || echo "MPVKit non scaricato, proseguo"
+          echo "--- stato submoduli ---"
+          git submodule status || true
 
       - name: Java per la parte Kotlin Multiplatform
         uses: actions/setup-java@v4
@@ -26,8 +33,6 @@ jobs:
         run: xcodebuild -version
 
       - name: Compila senza firma
-        # NUVIO_IOS_DISTRIBUTION=full abilita il set completo di funzionalita:
-        # se la build si lamenta di questa variabile, togli la riga env.
         env:
           NUVIO_IOS_DISTRIBUTION: full
         run: |
@@ -53,11 +58,10 @@ jobs:
           zip -qry Nuvio-unsigned.ipa Payload
 
       - name: Leggi bundle ID e versione
-        # Te li stampa nel log: sono i valori che ti servono per l'App ID e per il manifest
         run: |
           PLIST=$(find Payload -maxdepth 2 -name "Info.plist" | head -n 1)
           echo "--- dati per Apple Developer e manifest.plist ---"
-          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier"        "$PLIST"
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier"         "$PLIST"
           /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$PLIST"
           /usr/libexec/PlistBuddy -c "Print :CFBundleVersion"            "$PLIST"
           /usr/libexec/PlistBuddy -c "Print :MinimumOSVersion"           "$PLIST"
